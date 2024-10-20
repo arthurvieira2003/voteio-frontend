@@ -1,3 +1,10 @@
+body,
+html {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 .login-paper {
   margin-top: 64px;
   display: flex;
@@ -20,6 +27,9 @@
 .login-container {
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .full-height {
@@ -38,7 +48,8 @@
   max-width: 400px;
   padding: 32px;
   border-radius: 16px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  background: linear-gradient(145deg, #ffffff, #f0f0f0);
 }
 
 .login-title {
@@ -48,8 +59,10 @@
 }
 
 .login-subtitle {
+  margin-top: 16px;
   margin-bottom: 24px;
   color: #757575;
+  text-align: center;
 }
 
 .login-form {
@@ -79,4 +92,12 @@
   .login-image-container {
     display: none;
   }
+}
+
+.MuiOutlinedInput-root.Mui-focused .MuiOutlinedInput-notchedOutline {
+  border-color: #9571f5 !important;
+}
+
+.MuiInputLabel-root.Mui-focused {
+  color: #9571f5 !important;
 }
