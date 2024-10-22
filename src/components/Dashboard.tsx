@@ -11,6 +11,7 @@ import {
   CardActions,
   IconButton,
   Chip,
+  Divider,
 } from "@mui/material";
 import { motion, AnimatePresence } from "framer-motion";
 import { ThemeProvider } from "@mui/material/styles";
@@ -19,12 +20,16 @@ import ThumbDownIcon from "@mui/icons-material/ThumbDown";
 import CommentIcon from "@mui/icons-material/Comment";
 import Logo from "./Logo";
 import DashboardHeader from "./DashboardHeader";
-import { getToken } from "../utils/auth";
+import { getToken, decodeToken } from "../utils/auth";
 import axios from "axios";
 import theme from "../theme";
 import ThumbUpOutlinedIcon from "@mui/icons-material/ThumbUpOutlined";
 import ThumbDownOutlinedIcon from "@mui/icons-material/ThumbDownOutlined";
 import Skeleton from "@mui/material/Skeleton";
+import PublishIdeaSection from "./PublishIdeaSection";
+import PersonIcon from "@mui/icons-material/Person";
+import DeleteIcon from "@mui/icons-material/Delete";
+import Swal from "sweetalert2";
 
 interface Comentario {
   codigoUsuario: string;
@@ -41,6 +46,8 @@ interface Ideia {
   downvotes: number;
   comentarios: Comentario[];
   userVote?: 1 | 2 | null;
+  nomeUsuario: string;
+  emailUsuario: string;
 }
 
 const api = axios.create({
@@ -63,9 +70,24 @@ const Dashboard: React.FC = () => {
   const [ideias, setIdeias] = useState<Ideia[]>([]);
   const [focusedIdea, setFocusedIdea] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [commentText, setCommentText] = useState("");
+  const [commentingIdeaId, setCommentingIdeaId] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+    nome: string;
+    email: string;
+  } | null>(null);
+  const [newIdeaTitle, setNewIdeaTitle] = useState("");
 
   useEffect(() => {
     fetchIdeias();
+    const token = getToken();
+    if (token) {
+      const decodedToken = decodeToken(token);
+      console.log("Decoded Token:", decodedToken);
+      if (decodedToken) {
+        setCurrentUser({ nome: decodedToken.nome, email: decodedToken.email });
+      }
+    }
   }, []);
 
   const fetchIdeias = async () => {
@@ -86,6 +108,7 @@ const Dashboard: React.FC = () => {
       });
 
       setIdeias(ideiasAtualizadas);
+      console.log("Ideias atualizadas:", ideiasAtualizadas);
     } catch (error) {
       console.error("Erro ao buscar ideias:", error);
     } finally {
@@ -97,14 +120,18 @@ const Dashboard: React.FC = () => {
     e.preventDefault();
     try {
       await api.post(
-        "http://localhost:5045/Ideia",
-        { descricao: newIdea },
+        "http://localhost:5045/Ideias",
+        {
+          titulo: newIdeaTitle,
+          descricao: newIdea,
+        },
         {
           headers: {
             Authorization: `Bearer ${getToken()}`,
           },
         }
       );
+      setNewIdeaTitle("");
       setNewIdea("");
       fetchIdeias();
     } catch (error) {
@@ -112,10 +139,22 @@ const Dashboard: React.FC = () => {
     }
   };
 
-  const handleFocusIdea = (codigo: string) => {
+  const handleFocusIdea = (
+    codigo: string,
+    focusCommentInput: boolean = false
+  ) => {
     setFocusedIdea((prevFocusedIdea) =>
       prevFocusedIdea === codigo ? null : codigo
     );
+    setCommentingIdeaId(codigo);
+    if (focusCommentInput) {
+      setTimeout(() => {
+        const commentInput = document.getElementById(`comment-input-${codigo}`);
+        if (commentInput) {
+          (commentInput as HTMLInputElement).focus();
+        }
+      }, 100);
+    }
   };
 
   const handleVote = async (codigoIdeia: string, tipoVote: 1 | 2) => {
@@ -233,6 +272,88 @@ const Dashboard: React.FC = () => {
     }
   };
 
+  const handleCommentSubmit = async (ideaId: string) => {
+    if (!currentUser) {
+      console.error("Usuário não está logado");
+      return;
+    }
+
+    try {
+      const response = await api.post(
+        "http://localhost:5045/Ideias/Comentario",
+        {
+          codigoIdeia: ideaId,
+          texto: commentText,
+        }
+      );
+
+      if (response.status === 200) {
+        // Buscar todas as ideias atualizadas
+        const ideiasAtualizadas = await api.get("http://localhost:5045/Ideias");
+
+        if (ideiasAtualizadas.status === 200) {
+          const todasIdeias = ideiasAtualizadas.data.ideias;
+          const novaIdeia = todasIdeias.find(
+            (ideia: Ideia) => ideia.codigo === ideaId
+          );
+
+          if (novaIdeia) {
+            setIdeias((prevIdeias) =>
+              prevIdeias.map((ideia) =>
+                ideia.codigo === ideaId ? novaIdeia : ideia
+              )
+            );
+
+            setCommentText("");
+            setCommentingIdeaId(null);
+          }
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao adicionar comentário:", error);
+      // Aqui você pode adicionar uma notificação de erro para o usuário
+    }
+  };
+
+  const handleDeleteIdea = async (codigoIdeia: string) => {
+    const result = await Swal.fire({
+      title: "Tem certeza?",
+      text: "Você não poderá reverter esta ação!",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#3085d6",
+      cancelButtonColor: "#d33",
+      confirmButtonText: "Sim, delete!",
+      cancelButtonText: "Cancelar",
+    });
+
+    if (result.isConfirmed) {
+      try {
+        const response = await api.delete("http://localhost:5045/Ideias", {
+          data: { codigoIdeia },
+        });
+
+        if (response.data.sucesso) {
+          setIdeias((prevIdeias) =>
+            prevIdeias.filter((ideia) => ideia.codigo !== codigoIdeia)
+          );
+          Swal.fire(
+            "Deletado!",
+            "Sua ideia foi removida com sucesso.",
+            "success"
+          );
+        }
+      } catch (error) {
+        console.error("Erro ao deletar ideia:", error);
+        Swal.fire(
+          "Erro",
+          "Não foi possível deletar a ideia. Por favor, tente novamente.",
+          "error"
+        );
+      }
+    }
+  };
+
   const LoadingSkeleton = () => (
     <motion.div
       initial={{ opacity: 0 }}
@@ -269,6 +390,8 @@ const Dashboard: React.FC = () => {
       ))}
     </motion.div>
   );
+
+  console.log("Current User:", currentUser);
 
   return (
     <ThemeProvider theme={theme}>
@@ -317,7 +440,16 @@ const Dashboard: React.FC = () => {
                 </Paper>
               </motion.div>
             </Grid>
-            <Grid item xs={12}>
+            <Grid item xs={12} md={4}>
+              <PublishIdeaSection
+                newIdeaTitle={newIdeaTitle}
+                setNewIdeaTitle={setNewIdeaTitle}
+                newIdea={newIdea}
+                setNewIdea={setNewIdea}
+                handleSubmitIdea={handleSubmitIdea}
+              />
+            </Grid>
+            <Grid item xs={12} md={8}>
               <AnimatePresence mode="wait">
                 {loading ? (
                   <LoadingSkeleton />
@@ -348,11 +480,32 @@ const Dashboard: React.FC = () => {
                         }}
                         onClick={() => handleFocusIdea(ideia.codigo)}
                       >
-                        <CardContent>
-                          <Typography variant="h6" gutterBottom>
+                        <CardContent sx={{ padding: 3 }}>
+                          <Typography
+                            variant="h6"
+                            gutterBottom
+                            sx={{ fontWeight: "bold", color: "#333" }}
+                          >
                             {ideia.titulo}
                           </Typography>
-                          <Typography variant="body2" color="text.secondary">
+                          <Typography
+                            variant="subtitle2"
+                            sx={{
+                              mb: 2,
+                              color: "#666",
+                              display: "flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            <PersonIcon sx={{ fontSize: 18, mr: 1 }} />
+                            Postado por: {ideia.nomeUsuario}
+                          </Typography>
+                          <Divider sx={{ my: 2 }} />
+                          <Typography
+                            variant="body2"
+                            color="text.secondary"
+                            sx={{ mt: 2, lineHeight: 1.6 }}
+                          >
                             {ideia.descricao}
                           </Typography>
                         </CardContent>
@@ -395,7 +548,7 @@ const Dashboard: React.FC = () => {
                             aria-label="comments"
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleFocusIdea(ideia.codigo);
+                              handleFocusIdea(ideia.codigo, true);
                             }}
                           >
                             <CommentIcon />
@@ -403,6 +556,23 @@ const Dashboard: React.FC = () => {
                           <Typography variant="body2">
                             {ideia.comentarios.length}
                           </Typography>
+                          {currentUser &&
+                            ideia.emailUsuario === currentUser.email &&
+                            (console.log(
+                              "Rendering delete button for idea:",
+                              ideia.codigo
+                            ),
+                            (
+                              <IconButton
+                                aria-label="delete"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteIdea(ideia.codigo);
+                                }}
+                              >
+                                <DeleteIcon />
+                              </IconButton>
+                            ))}
                         </CardActions>
                         {focusedIdea === ideia.codigo && (
                           <motion.div
@@ -411,7 +581,7 @@ const Dashboard: React.FC = () => {
                             exit={{ opacity: 0, height: 0 }}
                             transition={{ duration: 0.3 }}
                           >
-                            <CardContent>
+                            <CardContent onClick={(e) => e.stopPropagation()}>
                               <Typography variant="h6" gutterBottom>
                                 Comentários
                               </Typography>
@@ -433,6 +603,25 @@ const Dashboard: React.FC = () => {
                                   </Paper>
                                 </motion.div>
                               ))}
+                              <TextField
+                                id={`comment-input-${ideia.codigo}`}
+                                fullWidth
+                                variant="outlined"
+                                placeholder="Adicione um comentário..."
+                                value={commentText}
+                                onChange={(e) => setCommentText(e.target.value)}
+                                sx={{ mt: 2 }}
+                              />
+                              <Button
+                                variant="contained"
+                                color="primary"
+                                onClick={() =>
+                                  handleCommentSubmit(ideia.codigo)
+                                }
+                                sx={{ mt: 1 }}
+                              >
+                                Publicar Comentário
+                              </Button>
                             </CardContent>
                           </motion.div>
                         )}
@@ -441,56 +630,6 @@ const Dashboard: React.FC = () => {
                   ))
                 )}
               </AnimatePresence>
-            </Grid>
-            <Grid item xs={12}>
-              <motion.div
-                initial={{ x: 50, opacity: 0 }}
-                animate={{ x: 0, opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.4 }}
-              >
-                <Paper
-                  sx={{
-                    p: 2,
-                    display: "flex",
-                    flexDirection: "column",
-                    background: "linear-gradient(145deg, #ffffff, #f0f0f0)",
-                    borderRadius: "16px",
-                    boxShadow: "0 8px 16px rgba(0, 0, 0, 0.1)",
-                  }}
-                >
-                  <Typography variant="h6" gutterBottom component="div">
-                    Submeter Nova Ideia
-                  </Typography>
-                  <form onSubmit={handleSubmitIdea}>
-                    <TextField
-                      fullWidth
-                      multiline
-                      rows={4}
-                      variant="outlined"
-                      placeholder="Digite sua ideia aqui..."
-                      value={newIdea}
-                      onChange={(e) => setNewIdea(e.target.value)}
-                      sx={{ mb: 2 }}
-                    />
-                    <Button
-                      type="submit"
-                      fullWidth
-                      variant="contained"
-                      sx={{
-                        background:
-                          "linear-gradient(45deg, #9571f5 30%, #ff6b6b 90%)",
-                        color: "white",
-                        "&:hover": {
-                          background:
-                            "linear-gradient(45deg, #8460e4 30%, #ff5a5a 90%)",
-                        },
-                      }}
-                    >
-                      Submeter Ideia
-                    </Button>
-                  </form>
-                </Paper>
-              </motion.div>
             </Grid>
           </Grid>
         </Container>

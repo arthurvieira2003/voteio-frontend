@@ -46,11 +46,6 @@ const LoginCard: React.FC = () => {
     }
   };
 
-  const handleForgotPassword = (e: React.MouseEvent) => {
-    e.preventDefault();
-    console.log("Esqueci minha senha clicado");
-  };
-
   return (
     <ThemeProvider theme={theme}>
       <Paper elevation={3} className="login-card">
@@ -119,15 +114,7 @@ const LoginCard: React.FC = () => {
             variant="body2"
             align="center"
             style={{ marginTop: "16px" }}
-          >
-            <a
-              href="#"
-              onClick={handleForgotPassword}
-              style={{ color: "#9571f5", textDecoration: "none" }}
-            >
-              Esqueci minha senha
-            </a>
-          </Typography>
+          ></Typography>
           <Typography
             variant="body2"
             align="center"
