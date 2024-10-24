@@ -1,14 +1,10 @@
 import { jwtDecode } from "jwt-decode";
 
 export const getToken = (): string | null => {
-  const cookies = document.cookie.split(";");
-  for (let i = 0; i < cookies.length; i++) {
-    const cookie = cookies[i].trim();
-    if (cookie.startsWith("token=")) {
-      return cookie.substring("token=".length, cookie.length);
-    }
-  }
-  return null;
+  const token = document.cookie
+    .split("; ")
+    .find((row) => row.startsWith("token="));
+  return token ? token.split("=")[1] : null;
 };
 
 export const decodeToken = (token: string) => {

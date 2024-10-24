@@ -23,14 +23,19 @@ const LoginCard: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const response = await axios.post("http://localhost:5045/Usuario/login", {
-        email,
-        password,
-      });
+      const response = await axios.post(
+        "http://148.113.172.140:8080/Usuario/login",
+        {
+          email,
+          password,
+        }
+      );
 
       if (response.status === 200 && response.data.token) {
-        // Armazenar o token nos cookies
-        document.cookie = `token=${response.data.token}; path=/; max-age=3600; SameSite=Strict; Secure`;
+        const secure = window.location.protocol === "https:";
+        document.cookie = `token=${
+          response.data.token
+        }; path=/; max-age=3600; SameSite=Lax${secure ? "; Secure" : ""}`;
         navigate("/dashboard");
       }
     } catch (error: any) {

@@ -30,6 +30,7 @@ import PublishIdeaSection from "./PublishIdeaSection";
 import PersonIcon from "@mui/icons-material/Person";
 import DeleteIcon from "@mui/icons-material/Delete";
 import Swal from "sweetalert2";
+import { io } from "socket.io-client";
 
 interface Comentario {
   codigoUsuario: string;
@@ -51,7 +52,7 @@ interface Ideia {
 }
 
 const api = axios.create({
-  baseURL: "http://localhost:5045",
+  baseURL: "http://148.113.172.140:8080",
   headers: {
     "Content-Type": "application/json",
   },
@@ -77,6 +78,7 @@ const Dashboard: React.FC = () => {
     email: string;
   } | null>(null);
   const [newIdeaTitle, setNewIdeaTitle] = useState("");
+  const [socket, setSocket] = useState<any>(null);
 
   useEffect(() => {
     fetchIdeias();
@@ -90,10 +92,66 @@ const Dashboard: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    const newSocket = io("http://148.113.172.140:8080");
+    setSocket(newSocket);
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!socket) return;
+
+    socket.on("atualizacaoIdeia", (data: { tipo: string; ideia: Ideia }) => {
+      if (data.tipo === "nova") {
+        setIdeias((prevIdeias) => [data.ideia, ...prevIdeias]);
+      }
+    });
+
+    socket.on(
+      "atualizacaoComentario",
+      (data: { tipo: string; comentario: Comentario; codigoIdeia: string }) => {
+        if (data.tipo === "novo") {
+          setIdeias((prevIdeias) =>
+            prevIdeias.map((ideia) =>
+              ideia.codigo === data.codigoIdeia
+                ? {
+                    ...ideia,
+                    comentarios: [...ideia.comentarios, data.comentario],
+                  }
+                : ideia
+            )
+          );
+        }
+      }
+    );
+
+    socket.on(
+      "atualizacaoVoto",
+      (data: { codigoIdeia: string; upvotes: number; downvotes: number }) => {
+        setIdeias((prevIdeias) =>
+          prevIdeias.map((ideia) =>
+            ideia.codigo === data.codigoIdeia
+              ? { ...ideia, upvotes: data.upvotes, downvotes: data.downvotes }
+              : ideia
+          )
+        );
+      }
+    );
+
+    return () => {
+      socket.off("atualizacaoIdeia");
+      socket.off("atualizacaoComentario");
+      socket.off("atualizacaoVoto");
+    };
+  }, [socket]);
+
   const fetchIdeias = async () => {
     try {
       setLoading(true);
-      const response = await api.get("http://localhost:5045/Ideias");
+      const response = await api.get("http://148.113.172.140:8080/Ideias");
       const ideiasData = response.data.ideias;
       const ideiasVotadas = await fetchIdeiasVotadas();
 
@@ -119,8 +177,8 @@ const Dashboard: React.FC = () => {
   const handleSubmitIdea = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await api.post(
-        "http://localhost:5045/Ideias",
+      const response = await api.post(
+        "http://148.113.172.140:8080/Ideias",
         {
           titulo: newIdeaTitle,
           descricao: newIdea,
@@ -133,7 +191,7 @@ const Dashboard: React.FC = () => {
       );
       setNewIdeaTitle("");
       setNewIdea("");
-      fetchIdeias();
+      socket.emit("novaIdeia", response.data);
     } catch (error) {
       console.error("Erro ao submeter ideia:", error);
     }
@@ -162,67 +220,33 @@ const Dashboard: React.FC = () => {
       const ideia = ideias.find((i) => i.codigo === codigoIdeia);
       if (!ideia) return;
 
+      let response;
       if (ideia.userVote === tipoVote) {
-        // Deletar o voto
-        const response = await api.delete("http://localhost:5045/Ideias", {
+        response = await api.delete("http://148.113.172.140:8080/Ideias", {
           data: { codigoIdeia },
         });
-        if (response.data.sucesso) {
-          setIdeias((prevIdeias) =>
-            prevIdeias.map((ideia) =>
-              ideia.codigo === codigoIdeia
-                ? {
-                    ...ideia,
-                    userVote: null,
-                    upvotes: tipoVote === 1 ? ideia.upvotes - 1 : ideia.upvotes,
-                    downvotes:
-                      tipoVote === 2 ? ideia.downvotes - 1 : ideia.downvotes,
-                  }
-                : ideia
-            )
-          );
-        }
       } else {
-        // Se já existe um voto diferente, primeiro remova-o
         if (ideia.userVote) {
-          await api.delete("http://localhost:5045/Ideias", {
+          await api.delete("http://148.113.172.140:8080/Ideias", {
             data: { codigoIdeia },
           });
         }
-
-        // Adicionar o novo voto
-        const response = await api.post("http://localhost:5045/Ideias/Vote", {
+        response = await api.post("http://148.113.172.140:8080/Ideias/Vote", {
           codigoIdeia,
           tipoVote,
         });
-        if (response.data.sucesso) {
-          setIdeias((prevIdeias) =>
-            prevIdeias.map((ideia) =>
-              ideia.codigo === codigoIdeia
-                ? {
-                    ...ideia,
-                    userVote: tipoVote,
-                    upvotes:
-                      tipoVote === 1
-                        ? ideia.upvotes + 1
-                        : ideia.userVote === 1
-                        ? ideia.upvotes - 1
-                        : ideia.upvotes,
-                    downvotes:
-                      tipoVote === 2
-                        ? ideia.downvotes + 1
-                        : ideia.userVote === 2
-                        ? ideia.downvotes - 1
-                        : ideia.downvotes,
-                  }
-                : ideia
-            )
-          );
-        }
+      }
+
+      if (response.data.sucesso) {
+        const updatedIdeia = response.data.ideia;
+        socket.emit("novoVoto", {
+          codigoIdeia,
+          upvotes: updatedIdeia.upvotes,
+          downvotes: updatedIdeia.downvotes,
+        });
       }
     } catch (error) {
       console.error("Erro ao votar:", error);
-      // Aqui você pode adicionar uma notificação de erro para o usuário
     }
   };
 
@@ -233,14 +257,12 @@ const Dashboard: React.FC = () => {
     let { upvotes, downvotes } = ideia;
 
     if (ideia.userVote === novoVoto) {
-      // Se o usuário está removendo seu voto
       if (novoVoto === 1) {
         upvotes--;
       } else {
         downvotes--;
       }
     } else if (ideia.userVote) {
-      // Se o usuário está mudando seu voto
       if (novoVoto === 1) {
         upvotes++;
         downvotes--;
@@ -249,7 +271,6 @@ const Dashboard: React.FC = () => {
         downvotes++;
       }
     } else {
-      // Se o usuário está votando pela primeira vez
       if (novoVoto === 1) {
         upvotes++;
       } else {
@@ -263,7 +284,7 @@ const Dashboard: React.FC = () => {
   const fetchIdeiasVotadas = async () => {
     try {
       const response = await api.get(
-        "http://localhost:5045/Usuario/ObterIdeiasVotadas"
+        "http://148.113.172.140:8080/Usuario/ObterIdeiasVotadas"
       );
       return response.data.ideiasVotadas;
     } catch (error) {
@@ -280,7 +301,7 @@ const Dashboard: React.FC = () => {
 
     try {
       const response = await api.post(
-        "http://localhost:5045/Ideias/Comentario",
+        "http://148.113.172.140:8080/Ideias/Comentario",
         {
           codigoIdeia: ideaId,
           texto: commentText,
@@ -288,30 +309,15 @@ const Dashboard: React.FC = () => {
       );
 
       if (response.status === 200) {
-        // Buscar todas as ideias atualizadas
-        const ideiasAtualizadas = await api.get("http://localhost:5045/Ideias");
-
-        if (ideiasAtualizadas.status === 200) {
-          const todasIdeias = ideiasAtualizadas.data.ideias;
-          const novaIdeia = todasIdeias.find(
-            (ideia: Ideia) => ideia.codigo === ideaId
-          );
-
-          if (novaIdeia) {
-            setIdeias((prevIdeias) =>
-              prevIdeias.map((ideia) =>
-                ideia.codigo === ideaId ? novaIdeia : ideia
-              )
-            );
-
-            setCommentText("");
-            setCommentingIdeaId(null);
-          }
-        }
+        setCommentText("");
+        setCommentingIdeaId(null);
+        socket.emit("novoComentario", {
+          ...response.data,
+          codigoIdeia: ideaId,
+        });
       }
     } catch (error) {
       console.error("Erro ao adicionar comentário:", error);
-      // Aqui você pode adicionar uma notificação de erro para o usuário
     }
   };
 
@@ -329,9 +335,12 @@ const Dashboard: React.FC = () => {
 
     if (result.isConfirmed) {
       try {
-        const response = await api.delete("http://localhost:5045/Ideias", {
-          data: { codigoIdeia },
-        });
+        const response = await api.delete(
+          "http://148.113.172.140:8080/Ideias",
+          {
+            data: { codigoIdeia },
+          }
+        );
 
         if (response.data.sucesso) {
           setIdeias((prevIdeias) =>

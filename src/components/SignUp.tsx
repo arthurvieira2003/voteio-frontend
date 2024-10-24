@@ -51,7 +51,7 @@ const SignUp: React.FC = () => {
     }
 
     try {
-      const response = await axios.post("http://localhost:5045/Usuario", {
+      const response = await axios.post("http://148.113.172.140:8080/Usuario", {
         nome,
         email,
         senha,
@@ -64,7 +64,7 @@ const SignUp: React.FC = () => {
           text: "Você será redirecionado para a página de login.",
           confirmButtonColor: "#9571f5",
         });
-        window.location.href = "http://localhost:3000";
+        window.location.href = "http://148.113.172.140:3000";
       }
     } catch (error: any) {
       const errorMessage =
