@@ -70,7 +70,7 @@ const Dashboard: React.FC = () => {
   const [newIdea, setNewIdea] = useState("");
   const [ideias, setIdeias] = useState<Ideia[]>([]);
   const [focusedIdea, setFocusedIdea] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentingIdeaId, setCommentingIdeaId] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<{
@@ -82,75 +82,23 @@ const Dashboard: React.FC = () => {
 
   useEffect(() => {
     fetchIdeias();
+    const pollInterval = setInterval(() => {
+      fetchIdeias();
+    }, 5000);
+
     const token = getToken();
     if (token) {
       const decodedToken = decodeToken(token);
-      console.log("Decoded Token:", decodedToken);
       if (decodedToken) {
         setCurrentUser({ nome: decodedToken.nome, email: decodedToken.email });
       }
     }
+
+    return () => clearInterval(pollInterval);
   }, []);
-
-  useEffect(() => {
-    const newSocket = io("http://148.113.172.140:8080");
-    setSocket(newSocket);
-
-    return () => {
-      newSocket.disconnect();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!socket) return;
-
-    socket.on("atualizacaoIdeia", (data: { tipo: string; ideia: Ideia }) => {
-      if (data.tipo === "nova") {
-        setIdeias((prevIdeias) => [data.ideia, ...prevIdeias]);
-      }
-    });
-
-    socket.on(
-      "atualizacaoComentario",
-      (data: { tipo: string; comentario: Comentario; codigoIdeia: string }) => {
-        if (data.tipo === "novo") {
-          setIdeias((prevIdeias) =>
-            prevIdeias.map((ideia) =>
-              ideia.codigo === data.codigoIdeia
-                ? {
-                    ...ideia,
-                    comentarios: [...ideia.comentarios, data.comentario],
-                  }
-                : ideia
-            )
-          );
-        }
-      }
-    );
-
-    socket.on(
-      "atualizacaoVoto",
-      (data: { codigoIdeia: string; upvotes: number; downvotes: number }) => {
-        setIdeias((prevIdeias) =>
-          prevIdeias.map((ideia) =>
-            ideia.codigo === data.codigoIdeia
-              ? { ...ideia, upvotes: data.upvotes, downvotes: data.downvotes }
-              : ideia
-          )
-        );
-      }
-    );
-
-    return () => {
-      socket.off("atualizacaoIdeia");
-      socket.off("atualizacaoComentario");
-      socket.off("atualizacaoVoto");
-    };
-  }, [socket]);
 
   const fetchIdeias = async () => {
     try {
-      setLoading(true);
       const response = await api.get("http://148.113.172.140:8080/Ideias");
       const ideiasData = response.data.ideias;
       const ideiasVotadas = await fetchIdeiasVotadas();
@@ -165,8 +113,26 @@ const Dashboard: React.FC = () => {
           : ideia;
       });
 
-      setIdeias(ideiasAtualizadas);
-      console.log("Ideias atualizadas:", ideiasAtualizadas);
+      setIdeias((prevIdeias) => {
+        const ideiasMap = new Map(
+          prevIdeias.map((ideia) => [ideia.codigo, ideia])
+        );
+        const atualizadas = ideiasAtualizadas.map((ideia: Ideia) => {
+          const anterior = ideiasMap.get(ideia.codigo);
+          if (!anterior) return ideia;
+
+          if (
+            anterior.upvotes === ideia.upvotes &&
+            anterior.downvotes === ideia.downvotes &&
+            anterior.comentarios.length === ideia.comentarios.length
+          ) {
+            return anterior;
+          }
+          return ideia;
+        });
+
+        return atualizadas;
+      });
     } catch (error) {
       console.error("Erro ao buscar ideias:", error);
     } finally {
@@ -176,12 +142,22 @@ const Dashboard: React.FC = () => {
 
   const handleSubmitIdea = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!newIdeaTitle.trim() || !newIdea.trim()) {
+      Swal.fire({
+        title: "Atenção",
+        text: "O título e a descrição da ideia não podem estar vazios",
+        icon: "warning",
+      });
+      return;
+    }
+
     try {
-      const response = await api.post(
+      await api.post(
         "http://148.113.172.140:8080/Ideias",
         {
-          titulo: newIdeaTitle,
-          descricao: newIdea,
+          titulo: newIdeaTitle.trim(),
+          descricao: newIdea.trim(),
         },
         {
           headers: {
@@ -191,7 +167,7 @@ const Dashboard: React.FC = () => {
       );
       setNewIdeaTitle("");
       setNewIdea("");
-      socket.emit("novaIdeia", response.data);
+      fetchIdeias();
     } catch (error) {
       console.error("Erro ao submeter ideia:", error);
     }
@@ -216,6 +192,20 @@ const Dashboard: React.FC = () => {
   };
 
   const handleVote = async (codigoIdeia: string, tipoVote: 1 | 2) => {
+    // Atualização otimista
+    const ideiaIndex = ideias.findIndex((i) => i.codigo === codigoIdeia);
+    const novasIdeias = [...ideias];
+    const novasNotas = calcularNovaNota(ideias[ideiaIndex], tipoVote);
+
+    novasIdeias[ideiaIndex] = {
+      ...novasIdeias[ideiaIndex],
+      upvotes: novasNotas.upvotes,
+      downvotes: novasNotas.downvotes,
+      userVote: tipoVote,
+    };
+
+    setIdeias(novasIdeias);
+
     try {
       const ideia = ideias.find((i) => i.codigo === codigoIdeia);
       if (!ideia) return;
@@ -238,14 +228,11 @@ const Dashboard: React.FC = () => {
       }
 
       if (response.data.sucesso) {
-        const updatedIdeia = response.data.ideia;
-        socket.emit("novoVoto", {
-          codigoIdeia,
-          upvotes: updatedIdeia.upvotes,
-          downvotes: updatedIdeia.downvotes,
-        });
+        fetchIdeias(); // Atualiza a lista após votar
       }
     } catch (error) {
+      // Em caso de erro, reverte a atualização otimista
+      setIdeias(ideias);
       console.error("Erro ao votar:", error);
     }
   };
@@ -299,22 +286,28 @@ const Dashboard: React.FC = () => {
       return;
     }
 
+    if (!commentText.trim()) {
+      Swal.fire({
+        title: "Atenção",
+        text: "O comentário não pode estar vazio",
+        icon: "warning",
+      });
+      return;
+    }
+
     try {
       const response = await api.post(
         "http://148.113.172.140:8080/Ideias/Comentario",
         {
           codigoIdeia: ideaId,
-          texto: commentText,
+          texto: commentText.trim(),
         }
       );
 
       if (response.status === 200) {
         setCommentText("");
         setCommentingIdeaId(null);
-        socket.emit("novoComentario", {
-          ...response.data,
-          codigoIdeia: ideaId,
-        });
+        fetchIdeias();
       }
     } catch (error) {
       console.error("Erro ao adicionar comentário:", error);
@@ -466,10 +459,10 @@ const Dashboard: React.FC = () => {
                   ideias.map((ideia) => (
                     <motion.div
                       key={ideia.codigo}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: -20 }}
-                      transition={{ duration: 0.5 }}
+                      layoutId={ideia.codigo}
+                      initial={false}
+                      animate={{ opacity: 1 }}
+                      transition={{ duration: 0.3 }}
                     >
                       <Card
                         id={`ideia-${ideia.codigo}`}
@@ -489,7 +482,14 @@ const Dashboard: React.FC = () => {
                         }}
                         onClick={() => handleFocusIdea(ideia.codigo)}
                       >
-                        <CardContent sx={{ padding: 3 }}>
+                        <CardContent
+                          sx={{
+                            padding: 3,
+                            height: "100%",
+                            display: "flex",
+                            flexDirection: "column",
+                          }}
+                        >
                           <Typography
                             variant="h6"
                             gutterBottom
@@ -513,7 +513,16 @@ const Dashboard: React.FC = () => {
                           <Typography
                             variant="body2"
                             color="text.secondary"
-                            sx={{ mt: 2, lineHeight: 1.6 }}
+                            sx={{
+                              mt: 2,
+                              lineHeight: 1.6,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              display: "-webkit-box",
+                              WebkitLineClamp: 3,
+                              WebkitBoxOrient: "vertical",
+                              transition: "all 0.3s ease-in-out",
+                            }}
                           >
                             {ideia.descricao}
                           </Typography>
@@ -584,55 +593,87 @@ const Dashboard: React.FC = () => {
                             ))}
                         </CardActions>
                         {focusedIdea === ideia.codigo && (
-                          <motion.div
-                            initial={{ opacity: 0, height: 0 }}
-                            animate={{ opacity: 1, height: "auto" }}
-                            exit={{ opacity: 0, height: 0 }}
-                            transition={{ duration: 0.3 }}
-                          >
-                            <CardContent onClick={(e) => e.stopPropagation()}>
-                              <Typography variant="h6" gutterBottom>
-                                Comentários
-                              </Typography>
-                              {ideia.comentarios.map((comentario, index) => (
-                                <motion.div
-                                  key={index}
-                                  initial={{ opacity: 0, y: 20 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  exit={{ opacity: 0, y: -20 }}
-                                  transition={{ delay: index * 0.1 }}
-                                >
-                                  <Paper elevation={1} sx={{ p: 2, mb: 2 }}>
-                                    <Typography variant="subtitle2">
-                                      {comentario.nomeUsuario}
-                                    </Typography>
-                                    <Typography variant="body2">
-                                      {comentario.comentario}
-                                    </Typography>
-                                  </Paper>
-                                </motion.div>
-                              ))}
-                              <TextField
-                                id={`comment-input-${ideia.codigo}`}
-                                fullWidth
-                                variant="outlined"
-                                placeholder="Adicione um comentário..."
-                                value={commentText}
-                                onChange={(e) => setCommentText(e.target.value)}
-                                sx={{ mt: 2 }}
-                              />
-                              <Button
-                                variant="contained"
-                                color="primary"
-                                onClick={() =>
-                                  handleCommentSubmit(ideia.codigo)
-                                }
-                                sx={{ mt: 1 }}
+                          <AnimatePresence mode="wait">
+                            <motion.div
+                              initial={{ opacity: 0, scaleY: 0 }}
+                              animate={{ opacity: 1, scaleY: 1 }}
+                              exit={{ opacity: 0, scaleY: 0 }}
+                              transition={{
+                                duration: 0.2,
+                                ease: "easeInOut",
+                              }}
+                              style={{
+                                overflow: "hidden",
+                                transformOrigin: "top",
+                              }}
+                            >
+                              <CardContent
+                                onClick={(e) => e.stopPropagation()}
+                                sx={{
+                                  paddingBottom: 2,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  gap: 2,
+                                }}
                               >
-                                Publicar Comentário
-                              </Button>
-                            </CardContent>
-                          </motion.div>
+                                <Typography variant="h6" gutterBottom>
+                                  Comentários
+                                </Typography>
+                                <AnimatePresence>
+                                  {ideia.comentarios.map(
+                                    (comentario, index) => (
+                                      <motion.div
+                                        key={index}
+                                        initial={{ opacity: 0 }}
+                                        animate={{ opacity: 1 }}
+                                        exit={{ opacity: 0 }}
+                                        transition={{ duration: 0.2 }}
+                                      >
+                                        <Paper
+                                          elevation={1}
+                                          sx={{ p: 2, mb: 2 }}
+                                        >
+                                          <Typography variant="subtitle2">
+                                            {comentario.nomeUsuario}
+                                          </Typography>
+                                          <Typography variant="body2">
+                                            {comentario.comentario}
+                                          </Typography>
+                                        </Paper>
+                                      </motion.div>
+                                    )
+                                  )}
+                                </AnimatePresence>
+                                <TextField
+                                  id={`comment-input-${ideia.codigo}`}
+                                  fullWidth
+                                  variant="outlined"
+                                  placeholder="Adicione um comentário..."
+                                  value={commentText}
+                                  onChange={(e) =>
+                                    setCommentText(e.target.value)
+                                  }
+                                  onKeyPress={(e) => {
+                                    if (e.key === "Enter" && !e.shiftKey) {
+                                      e.preventDefault();
+                                      handleCommentSubmit(ideia.codigo);
+                                    }
+                                  }}
+                                  sx={{ mt: 2 }}
+                                />
+                                <Button
+                                  variant="contained"
+                                  color="primary"
+                                  onClick={() =>
+                                    handleCommentSubmit(ideia.codigo)
+                                  }
+                                  sx={{ mt: 1 }}
+                                >
+                                  Publicar Comentário
+                                </Button>
+                              </CardContent>
+                            </motion.div>
+                          </AnimatePresence>
                         )}
                       </Card>
                     </motion.div>

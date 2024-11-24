@@ -1,6 +1,6 @@
-import React from 'react';
-import { Paper, Typography, TextField, Button } from '@mui/material';
-import { motion } from 'framer-motion';
+import React from "react";
+import { Paper, Typography, TextField, Button } from "@mui/material";
+import { motion } from "framer-motion";
 
 interface PublishIdeaSectionProps {
   newIdeaTitle: string;
@@ -26,14 +26,19 @@ const PublishIdeaSection: React.FC<PublishIdeaSectionProps> = ({
       <Paper
         sx={{
           p: 3,
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'linear-gradient(145deg, #ffffff, #f0f0f0)',
-          borderRadius: '16px',
-          boxShadow: '0 8px 16px rgba(0, 0, 0, 0.1)',
+          display: "flex",
+          flexDirection: "column",
+          background: "linear-gradient(145deg, #ffffff, #f0f0f0)",
+          borderRadius: "16px",
+          boxShadow: "0 8px 16px rgba(0, 0, 0, 0.1)",
         }}
       >
-        <Typography variant="h5" gutterBottom component="div" sx={{ mb: 2, color: '#757575' }}>
+        <Typography
+          variant="h5"
+          gutterBottom
+          component="div"
+          sx={{ mb: 2, color: "#757575" }}
+        >
           Compartilhe sua ideia inovadora
         </Typography>
         <form onSubmit={handleSubmitIdea}>
@@ -55,7 +60,12 @@ const PublishIdeaSection: React.FC<PublishIdeaSectionProps> = ({
             onChange={(e) => setNewIdea(e.target.value)}
             sx={{ mb: 2 }}
           />
-          <Button type="submit" fullWidth variant="contained">
+          <Button
+            type="submit"
+            fullWidth
+            variant="contained"
+            disabled={!newIdeaTitle.trim() || !newIdea.trim()}
+          >
             Publicar Ideia
           </Button>
         </form>

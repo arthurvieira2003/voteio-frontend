@@ -20,3 +20,17 @@ export const decodeToken = (token: string) => {
     return null;
   }
 };
+
+export const isTokenValid = (): boolean => {
+  const token = getToken();
+  if (!token) return false;
+
+  try {
+    const decoded = jwtDecode(token) as { exp: number };
+    const currentTime = Date.now() / 1000;
+
+    return decoded.exp > currentTime;
+  } catch {
+    return false;
+  }
+};
